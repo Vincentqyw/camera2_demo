@@ -1,0 +1,2 @@
+rootProject.name = "camera2_demo"
+include ':app'
