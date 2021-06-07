@@ -1,3 +1,12 @@
 <resources>
     <string name="app_name">camera2_demo</string>
+
+    <string name="toggleRecordingOn">Record</string>
+    <string name="toggleRecordingOff">Stop</string>
+    <string name="toggleImuViewOn">Start</string>
+    <string name="toggleImuViewOff">Stop</string>
+    <string name="snapshot">Snapshot</string>
+    <string name="numSnapshotLabel">#Snapshot</string>
+    <string name="numSnapshotText">0</string>
+
 </resources>

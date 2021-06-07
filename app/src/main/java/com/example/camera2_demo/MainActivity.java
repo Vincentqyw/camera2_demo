@@ -47,6 +47,9 @@ import java.io.File;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import timber.log.Timber;
 
 public class MainActivity extends AppCompatActivity {
 
@@ -82,6 +85,7 @@ public class MainActivity extends AppCompatActivity {
     private TextView tvMag;
     // 传感器
     private SensorManager sensorManager;
+    private IMUManager mImuManager; //用于保存IMU数据
 
     // Camera parameters
     private int imageWidth = 640;
@@ -89,6 +93,12 @@ public class MainActivity extends AppCompatActivity {
     private final int framesPerSecond = 30;
     /** Adjustment to auto-exposure (AE) target image brightness in EV */
     private final int aeCompensation = 0;
+
+    private String mSnapshotOutputDir = null;
+
+    // 控制是否录像
+    private boolean mRecordingEnabled = false;
+
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -143,6 +153,15 @@ public class MainActivity extends AppCompatActivity {
         Sensor sensorm = sensorManager.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD);
         sensorManager.registerListener(IMUMagListener, sensorm, SensorManager.SENSOR_DELAY_GAME);
 
+        // 保存图像路径
+        mSnapshotOutputDir =  renewOutputDir();
+
+        mRecordingEnabled = false;
+
+        // 保存IMU数据
+        if (mImuManager == null) {
+            mImuManager = new IMUManager(this);
+        }
     }
 
 
@@ -337,7 +356,7 @@ public class MainActivity extends AppCompatActivity {
          *  The following method will be called every time an image is ready
          *  be sure to use method acquireNextImage() and then close(), otherwise, the display may STOP
          */
-        long last_timestamp = 0;
+        Long last_timestamp = new Long(0);
         long update_counter;
         @Override
         public void onImageAvailable(ImageReader reader) {
@@ -366,7 +385,7 @@ public class MainActivity extends AppCompatActivity {
 
             int image_height = image.getHeight();
             int image_width = image.getWidth();
-            long timestamp = image.getTimestamp();
+            Long timestamp = image.getTimestamp();
             double fps = (double) (1e9 / (timestamp - last_timestamp));
 
             last_timestamp = timestamp;
@@ -387,9 +406,11 @@ public class MainActivity extends AppCompatActivity {
 
             //TODO: 保存图像
             {
-//                String name = String.valueOf(System.currentTimeMillis());
-//                Log.e("正在保存图像: ", String.valueOf(name));
-//                saveJpeg(image,name);
+
+                String outputFile = mSnapshotOutputDir + File.separator + "data"+ File.separator + timestamp.toString() + ".jpg";
+                File dest = new File(outputFile);
+                Timber.d("Saving image to %s", outputFile);
+                new ImageSaver(image, dest).run();
             }
 
 
@@ -491,7 +512,7 @@ public class MainActivity extends AppCompatActivity {
         // step18: 声明这个开始线程函数
         startBackgroundThread();
 
-        if(textureView.isAvailable())
+        if(textureView.isAvailable() && mRecordingEnabled)
         {
             try {
                 openCamera();
@@ -502,6 +523,9 @@ public class MainActivity extends AppCompatActivity {
         else {
             textureView.setSurfaceTextureListener(textureListener);
         }
+        // IMU写数据
+        mImuManager.register();
+        updateControls();
     }
 
     // step19: 实现这个开始线程函数
@@ -520,6 +544,7 @@ public class MainActivity extends AppCompatActivity {
         } catch (InterruptedException e) {
             e.printStackTrace();
         }
+        mImuManager.unregister();
     }
     // step17: 实现这个停止线程函数
     protected void stopBackgroundThread() throws InterruptedException {
@@ -528,19 +553,48 @@ public class MainActivity extends AppCompatActivity {
         mBackgroundHandler = null;
     }
 
-    private void saveJpeg(Image image,String name) {
+    public String renewOutputDir() {
+        SimpleDateFormat dateFormat =
+                new SimpleDateFormat("yyyy_MM_dd_HH_mm_ss");
+        String folderName = dateFormat.format(new Date());
+        String dir1 = getFilesDir().getAbsolutePath();
+        String dir2 = Environment.getExternalStorageDirectory().
+                getAbsolutePath() + File.separator + "mars_logger";
 
-        Image.Plane[] planes = image.getPlanes();
-        ByteBuffer buffer = planes[0].getBuffer();
-        int pixelStride = planes[0].getPixelStride();
-        int rowStride = planes[0].getRowStride();
-        int rowPadding = rowStride - pixelStride * imageWidth;
+        String dir3 = getExternalFilesDir(
+                Environment.getDataDirectory().getAbsolutePath()).getAbsolutePath();
+        Timber.d("dir 1 %s\ndir 2 %s\ndir 3 %s", dir1, dir2, dir3);
+        // dir1 and dir3 are always available for the app even the
+        // write external storage permission is not granted.
+        // "Apparently in Marshmallow when you install with Android studio it
+        // never asks you if you should give it permission it just quietly
+        // fails, like you denied it. You must go into Settings, apps, select
+        // your application and flip the permission switch on."
+        // ref: https://stackoverflow.com/questions/40087355/android-mkdirs-not-working
+        String outputDir = dir3 + File.separator + folderName;
+        String outputDirImage = dir3 + File.separator + folderName + File.separator + "data";
+        (new File(outputDir)).mkdirs();
+        (new File(outputDirImage)).mkdirs();
+        return outputDir;
+    }
 
-
-        Bitmap bitmap = Bitmap.createBitmap(imageWidth + rowPadding / pixelStride, imageHeight, Bitmap.Config.ARGB_8888);
-        bitmap.copyPixelsFromBuffer(buffer);
-        bitmap.compress(Bitmap.CompressFormat.JPEG, 10,null);
-        ImageSaveUtil.saveBitmap2file(bitmap,getApplicationContext(),name);
-
+    public void clickToggleRecording(View view) {
+        mRecordingEnabled = !mRecordingEnabled;
+        if (mRecordingEnabled) {
+            String inertialFile = mSnapshotOutputDir + File.separator + "gyro_accel.csv";
+            mImuManager.startRecording(inertialFile);
+        } else {
+            mImuManager.stopRecording();
+        }
+        updateControls();
+    }
+    /**
+     * Updates the on-screen controls to reflect the current state of the app.
+     */
+    private void updateControls() {
+        Button toggleRelease = (Button) findViewById(R.id.button_recording);
+        int id = mRecordingEnabled ?
+                R.string.toggleRecordingOff : R.string.toggleRecordingOn;
+        toggleRelease.setText(id);
     }
 }
